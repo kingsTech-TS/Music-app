@@ -1,10 +1,22 @@
 import { useEffect, useState } from 'react';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+import Constants from 'expo-constants';
+import { isRunningInExpoGo } from 'expo';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/useAuthStore';
 
 WebBrowser.maybeCompleteAuthSession();
+
+// Expo Go 58 reports executionEnvironment "bare", so check for the ExpoGo native module instead.
+const IS_EXPO_GO = isRunningInExpoGo();
+
+// Expo Go's own deep-link address for this project, e.g. exp://192.168.1.138:8081/--/spotify-auth.
+// Built by hand because makeRedirectUri also sees "bare" and returns rave://, which Expo Go can't open.
+function expoGoRedirectUri(path) {
+  const hostUri = Constants.expoConfig?.hostUri;
+  return hostUri ? `exp://${hostUri}/--/${path}` : AuthSession.makeRedirectUri({ path });
+}
 
 const discovery = {
   authorizationEndpoint: 'https://accounts.spotify.com/authorize',
@@ -31,7 +43,16 @@ export function useSpotifyLogin() {
       .catch((e) => setError(e.message));
   }, []);
 
-  const redirectUri = config?.redirect_uri || AuthSession.makeRedirectUri({ path: 'spotify-auth' });
+  // Expo Go can't receive rave:// links (the scheme only exists in a dev/production build), so there
+  // Spotify must send the user back to Expo Go's own exp://<ip>:<port>/--/spotify-auth address instead.
+  // That address must also be added to the Spotify app's Redirect URIs, and accepted by the backend.
+  const redirectUri = IS_EXPO_GO
+    ? expoGoRedirectUri('spotify-auth')
+    : config?.redirect_uri || AuthSession.makeRedirectUri({ scheme: 'rave', path: 'spotify-auth' });
+
+  useEffect(() => {
+    if (__DEV__) console.log('[spotify] redirect URI:', redirectUri);
+  }, [redirectUri]);
 
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
     {
