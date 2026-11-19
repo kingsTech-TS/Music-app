@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { Stack } from "expo-router";
 import { usePlayerStore } from "../store/usePlayerStore";
+import { useAuthStore } from "../store/useAuthStore";
+import TrackActionsSheet from "../components/TrackActionsSheet";
 
 // Safe check for TrackPlayer to prevent Expo Go crashes
 const getTrackPlayer = () => {
@@ -19,7 +21,13 @@ if (isNative) {
 }
 
 export default function RootLayout() {
-  const { setPlayerReady } = usePlayerStore();
+  const { setPlayerReady, initLocalMusic } = usePlayerStore();
+  const hydrate = useAuthStore((s) => s.hydrate);
+
+  useEffect(() => {
+    hydrate(); // restores (or silently creates) this device's account
+    initLocalMusic(); // picks up songs on the device if permission was already granted
+  }, []);
 
   useEffect(() => {
     async function setupPlayer() {
@@ -51,6 +59,7 @@ export default function RootLayout() {
   }, []);
 
   return (
+    <>
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="onboarding" />
       <Stack.Screen name="(tabs)" />
@@ -68,5 +77,7 @@ export default function RootLayout() {
         }}
       />
     </Stack>
+    <TrackActionsSheet />
+    </>
   );
 }

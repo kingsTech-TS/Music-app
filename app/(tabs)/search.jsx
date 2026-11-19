@@ -1,56 +1,101 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, SafeAreaView } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  FlatList,
+  ActivityIndicator,
+  SafeAreaView,
+  TouchableOpacity,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { usePlayerStore } from '../../store/usePlayerStore';
 import TrackItem from '../../components/TrackItem';
+import { useAuthStore } from '../../store/useAuthStore';
+import { api } from '../../lib/api';
+
+const MIN_CHARS = 3;
+const DEBOUNCE_MS = 350;
 
 export default function SearchScreen() {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
-  const { searchResults, setSearchResults, playTrack, theme } = usePlayerStore();
-  const [recentSearches, setRecentSearches] = useState([
-    'Ariana Grande', 'The Weeknd', 'Justin Bieber', 'Drake', 'Blinding Lights', 'Positions'
-  ]);
+  const [error, setError] = useState('');
+  const { searchResults, setSearchResults, playList, theme, localTracks } = usePlayerStore();
+  const userId = useAuthStore((s) => s.user?.id);
+  const [recentSearches, setRecentSearches] = useState([]);
+  const debounce = useRef(null);
+  const latest = useRef(''); // ignore responses for stale queries
 
+  const loadRecent = () => api.search.recent().then(setRecentSearches).catch(() => {});
 
+  useEffect(() => {
+    if (userId) loadRecent();
+  }, [userId]);
 
-  const handleSearch = async (text) => {
+  useEffect(() => () => clearTimeout(debounce.current), []);
+
+  // Songs on the device that match — works offline too.
+  const q = query.trim().toLowerCase();
+  const localMatches = useMemo(
+    () =>
+      q.length >= MIN_CHARS
+        ? localTracks.filter((t) =>
+            [t.title, t.artist, t.album].some((v) => v && v.toLowerCase().includes(q))
+          )
+        : [],
+    [q, localTracks]
+  );
+  const results = [...localMatches, ...searchResults];
+
+  const runSearch = async (text, save = false) => {
+    latest.current = text;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.search.query(text, save);
+      if (latest.current === text) setSearchResults(res.tracks);
+      if (save) loadRecent();
+    } catch (e) {
+      if (latest.current === text) setError(e.message);
+    } finally {
+      if (latest.current === text) setLoading(false);
+    }
+  };
+
+  const handleSearch = (text) => {
     setQuery(text);
-    if (text.length < 3) {
+    clearTimeout(debounce.current);
+    if (text.trim().length < MIN_CHARS) {
+      latest.current = '';
       setSearchResults([]);
+      setLoading(false);
       return;
     }
+    debounce.current = setTimeout(() => runSearch(text.trim()), DEBOUNCE_MS);
+  };
 
-    setLoading(true);
-    // Mocking an API call
-    setTimeout(() => {
-      const mockResults = [
-        {
-          id: 'mock1',
-          url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-          title: 'Streaming Song 1',
-          artist: 'Online Artist',
-          artwork: 'https://picsum.photos/seed/online1/200',
-        },
-        {
-          id: 'mock2',
-          url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-          title: 'Streaming Song 2',
-          artist: 'Online Artist',
-          artwork: 'https://picsum.photos/seed/online2/200',
-        },
-        {
-          id: 'mock3',
-          url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
-          title: 'Streaming Song 3',
-          artist: 'Online Artist',
-          artwork: 'https://picsum.photos/seed/online3/200',
-        },
-      ].filter(song => song.title.toLowerCase().includes(text.toLowerCase()));
-      
-      setSearchResults(mockResults);
-      setLoading(false);
-    }, 1000);
+  // Tapping a recent search or submitting from the keyboard saves it to recent searches.
+  const submitSearch = (text) => {
+    setQuery(text);
+    clearTimeout(debounce.current);
+    if (text.trim().length >= MIN_CHARS) runSearch(text.trim(), true);
+  };
+
+  const playResult = (index) => {
+    if (query.trim()) api.search.addRecent(query.trim()).then(setRecentSearches).catch(() => {});
+    playList(results, index);
+  };
+
+  const clearAll = async () => {
+    setRecentSearches([]);
+    api.search.clearRecent().catch(loadRecent);
+  };
+
+  const removeRecent = (item) => {
+    setRecentSearches(recentSearches.filter((s) => s !== item));
+    api.search.removeRecent(item).catch(loadRecent);
   };
 
   return (
@@ -63,24 +108,34 @@ export default function SearchScreen() {
           placeholderTextColor={theme.secondaryText}
           value={query}
           onChangeText={handleSearch}
+          onSubmitEditing={() => submitSearch(query)}
+          returnKeyType="search"
+          autoCorrect={false}
           autoFocus
         />
+        {!!query && (
+          <TouchableOpacity onPress={() => handleSearch('')} hitSlop={10}>
+            <Ionicons name="close-circle" size={18} color={theme.secondaryText} />
+          </TouchableOpacity>
+        )}
       </View>
 
-      {loading ? (
+      {loading && !localMatches.length ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={theme.accent} />
         </View>
-      ) : query.length >= 3 ? (
+      ) : query.trim().length >= MIN_CHARS ? (
         <FlatList
-          data={searchResults}
+          data={results}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <TrackItem track={item} onPlay={playTrack} theme={theme} />
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item, index }) => (
+            <TrackItem track={item} onPlay={() => playResult(index)} theme={theme} />
           )}
+          contentContainerStyle={{ paddingBottom: 100 }}
           ListEmptyComponent={
             <View style={styles.centered}>
-              <Text style={[styles.emptyText, { color: theme.secondaryText }]}>No results found</Text>
+              <Text style={[styles.emptyText, { color: theme.secondaryText }]}>{error || 'No results found'}</Text>
             </View>
           }
         />
@@ -88,17 +143,20 @@ export default function SearchScreen() {
         <View style={styles.recentSection}>
           <View style={styles.recentHeader}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>Recent Searches</Text>
-            <TouchableOpacity onPress={() => setRecentSearches([])}>
-              <Text style={{ color: theme.accent, fontWeight: '700' }}>Clear All</Text>
-            </TouchableOpacity>
+            {recentSearches.length > 0 && (
+              <TouchableOpacity onPress={clearAll}>
+                <Text style={{ color: theme.accent, fontWeight: '700' }}>Clear All</Text>
+              </TouchableOpacity>
+            )}
           </View>
           <FlatList
             data={recentSearches}
             keyExtractor={(item) => item}
+            keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => (
-              <TouchableOpacity style={styles.recentItem} onPress={() => handleSearch(item)}>
+              <TouchableOpacity style={styles.recentItem} onPress={() => submitSearch(item)}>
                 <Text style={[styles.recentText, { color: theme.secondaryText }]}>{item}</Text>
-                <TouchableOpacity onPress={() => setRecentSearches(recentSearches.filter(s => s !== item))}>
+                <TouchableOpacity onPress={() => removeRecent(item)} hitSlop={10}>
                   <Ionicons name="close" size={20} color={theme.secondaryText} />
                 </TouchableOpacity>
               </TouchableOpacity>
@@ -173,4 +231,3 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   }
 });
-

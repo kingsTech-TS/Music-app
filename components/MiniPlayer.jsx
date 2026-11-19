@@ -1,69 +1,100 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { usePlayerStore } from '../store/usePlayerStore';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Image, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { usePlayerStore } from '../store/usePlayerStore';
+import { Equalizer, PressableScale } from './Motion';
 
+// Compact player shown above the tab bar while a track is loaded. Slides up when a song starts.
 export default function MiniPlayer() {
   const { currentTrack, isPlaying, togglePlayback, theme } = usePlayerStore();
   const router = useRouter();
+  const enter = useRef(new Animated.Value(0)).current;
 
+  useEffect(() => {
+    if (currentTrack) {
+      enter.setValue(0);
+      Animated.spring(enter, { toValue: 1, useNativeDriver: true, speed: 12, bounciness: 8 }).start();
+    }
+  }, [currentTrack?.id]);
 
   if (!currentTrack) return null;
 
   return (
-    <TouchableOpacity 
-      style={[styles.container, { backgroundColor: theme.surface, borderTopColor: theme.secondaryText + '33' }]} 
-      activeOpacity={0.9} 
-      onPress={() => router.push('/now-playing')}
+    <Animated.View
+      style={[
+        styles.wrap,
+        {
+          opacity: enter,
+          transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }],
+        },
+      ]}
     >
-      <Image source={{ uri: currentTrack.artwork }} style={styles.artwork} />
-      <View style={styles.info}>
-        <Text style={[styles.title, { color: theme.text }]} numberOfLines={1}>{currentTrack.title}</Text>
-        <Text style={[styles.artist, { color: theme.secondaryText }]} numberOfLines={1}>{currentTrack.artist}</Text>
-      </View>
-      <TouchableOpacity onPress={togglePlayback} style={styles.controlButton}>
-        <Ionicons name={isPlaying ? "pause" : "play"} size={28} color={theme.text} />
-      </TouchableOpacity>
-    </TouchableOpacity>
-
+      <PressableScale
+        scaleTo={0.97}
+        style={[styles.container, { backgroundColor: theme.surface, borderColor: theme.surfaceLight || theme.surface }]}
+        onPress={() => router.push('/now-playing')}
+      >
+        {currentTrack.artwork ? (
+          <Image source={{ uri: currentTrack.artwork }} style={styles.artwork} />
+        ) : (
+          <View style={[styles.artwork, styles.artFallback, { backgroundColor: theme.primary }]}>
+            <Ionicons name="musical-note" size={20} color={theme.accent} />
+          </View>
+        )}
+        <View style={styles.info}>
+          <Text style={[styles.title, { color: theme.text }]} numberOfLines={1}>{currentTrack.title}</Text>
+          <Text style={[styles.artist, { color: theme.secondaryText }]} numberOfLines={1}>{currentTrack.artist}</Text>
+        </View>
+        <Equalizer color={theme.accent} bars={3} height={14} playing={isPlaying} style={{ marginRight: 12 }} />
+        <PressableScale onPress={togglePlayback} scaleTo={0.85} style={[styles.controlButton, { backgroundColor: theme.accent }]}>
+          <Ionicons name={isPlaying ? 'pause' : 'play'} size={20} color={theme.onAccent || '#000'} />
+        </PressableScale>
+      </PressableScale>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrap: {
+    alignSelf: 'stretch',
+    marginHorizontal: 16,
+    marginBottom: 10,
+  },
+  artFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 60,
-    backgroundColor: '#1c1c1e',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    borderTopWidth: 0.5,
-    borderTopColor: '#333',
+    padding: 8,
+    borderRadius: 22,
+    borderWidth: 1,
   },
   artwork: {
-    width: 45,
-    height: 45,
-    borderRadius: 4,
-    backgroundColor: '#333',
+    width: 44,
+    height: 44,
+    borderRadius: 14,
   },
   info: {
     flex: 1,
     marginLeft: 12,
   },
   title: {
-    color: '#fff',
     fontSize: 14,
     fontWeight: '600',
   },
   artist: {
-    color: '#b3b3b3',
     fontSize: 12,
+    marginTop: 2,
   },
   controlButton: {
-    padding: 8,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 2,
   },
 });
