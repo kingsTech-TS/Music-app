@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   FlatList,
   Image,
   TextInput,
@@ -12,6 +11,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { PressableScale } from '../../components/Motion';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -80,7 +80,7 @@ export default function PlaylistsScreen() {
     router.push({ pathname: '/detail', params: { type: 'playlist', id: p.id, title: p.name, artwork: p.cover || '' } });
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.primary }]}>
+    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: theme.primary }]}>
       <View style={styles.header}>
         <Text style={[styles.title, { color: theme.text }]}>My Playlists</Text>
         <PressableScale style={[styles.addBtn, { backgroundColor: theme.accent }]} onPress={() => setCreating(true)}>

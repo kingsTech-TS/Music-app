@@ -1,9 +1,11 @@
 import React from 'react';
 import {
-  View, Text, StyleSheet, SafeAreaView, ScrollView, Alert, Image, ActivityIndicator, Linking,
+  View, Text, StyleSheet, ScrollView, Alert, Image, ActivityIndicator, Linking,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { PressableScale } from '../../components/Motion';
 import Constants from 'expo-constants';
+import { useRouter } from 'expo-router';
 import { usePlayerStore, themes } from '../../store/usePlayerStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useSpotifyLogin } from '../../hooks/useSpotifyLogin';
@@ -17,7 +19,8 @@ export default function SettingsScreen() {
     theme, themeName, setTheme,
     localTracks, localPermission, localScanning, requestLocalMusic, scanLocalMusic,
   } = usePlayerStore();
-  const { user, updatePreferences, disconnectSpotify, sessionError } = useAuthStore();
+  const router = useRouter();
+  const { user, updatePreferences, disconnectSpotify, logout, sessionError } = useAuthStore();
   const spotify = useSpotifyLogin();
   const prefs = user?.preferences || { audio_quality: 'very_high', gapless_playback: true };
   const connected = !!user?.spotify?.connected;
@@ -42,6 +45,16 @@ export default function SettingsScreen() {
         text: 'Disconnect',
         style: 'destructive',
         onPress: () => disconnectSpotify().catch((e) => Alert.alert('Could not disconnect', e.message)),
+      },
+    ]);
+
+  const confirmLogout = () =>
+    Alert.alert('Log out', 'You can log back in any time. Songs on this device stay available.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Log out',
+        style: 'destructive',
+        onPress: () => logout().catch((e) => Alert.alert('Could not log out', e.message)),
       },
     ]);
 
@@ -76,8 +89,44 @@ export default function SettingsScreen() {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.primary }]}>
+    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: theme.primary }]}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>Account</Text>
+        <View style={styles.section}>
+          {user?.has_password ? (
+            <>
+              <View style={[styles.option, { backgroundColor: theme.surface }]}>
+                <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: theme.accent }]}>
+                  <Text style={{ color: theme.onAccent || '#000', fontWeight: '800' }}>
+                    {(user.name || user.email || '?').charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={[styles.optionText, { color: theme.text }]}>{user.name}</Text>
+                  <Text style={[styles.optionValue, { color: theme.secondaryText, marginTop: 2 }]}>{user.email}</Text>
+                </View>
+              </View>
+              <PressableScale style={[styles.option, { backgroundColor: theme.surface }]} onPress={confirmLogout}>
+                <Text style={[styles.optionText, { color: '#ff6b6b' }]}>Log out</Text>
+                <Ionicons name="log-out-outline" size={20} color="#ff6b6b" />
+              </PressableScale>
+            </>
+          ) : (
+            <PressableScale
+              style={[styles.option, { backgroundColor: theme.surface }]}
+              onPress={() => router.push({ pathname: '/auth', params: { mode: 'register' } })}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.optionText, { color: theme.text }]}>Sign up or log in</Text>
+                <Text style={[styles.optionValue, { color: theme.secondaryText, marginTop: 2 }]}>
+                  Keep your likes and playlists on every device
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={theme.secondaryText} />
+            </PressableScale>
+          )}
+        </View>
+
         <Text style={[styles.sectionTitle, { color: theme.text }]}>Spotify</Text>
         <View style={styles.section}>
           {connected ? (
@@ -98,6 +147,23 @@ export default function SettingsScreen() {
                 </View>
                 <Ionicons name="checkmark-circle" size={22} color={theme.accent} />
               </View>
+              <PressableScale
+                style={[styles.option, { backgroundColor: theme.surface }]}
+                onPress={spotify.connect}
+                disabled={spotify.connecting}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.optionText, { color: theme.text }]}>Reconnect</Text>
+                  <Text style={[styles.optionValue, { color: theme.secondaryText, marginTop: 2 }]}>
+                    Refresh Spotify permissions
+                  </Text>
+                </View>
+                {spotify.connecting ? (
+                  <ActivityIndicator color={theme.accent} />
+                ) : (
+                  <Ionicons name="refresh" size={20} color={theme.secondaryText} />
+                )}
+              </PressableScale>
               <PressableScale style={[styles.option, { backgroundColor: theme.surface }]} onPress={confirmDisconnect}>
                 <Text style={[styles.optionText, { color: theme.secondaryText }]}>Disconnect Spotify</Text>
                 <Ionicons name="unlink-outline" size={20} color={theme.secondaryText} />

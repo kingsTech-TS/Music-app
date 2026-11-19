@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { FontAwesome, Ionicons } from '@expo/vector-icons';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { isRemoteTrack } from '../lib/api';
 import { Equalizer, PressableScale } from './Motion';
@@ -47,7 +47,14 @@ export default function TrackItem({ track, onDrag, isActive, onPlay, theme, acti
         >
           {track.title}
         </Text>
-        <Text style={[styles.artist, { color: currentTheme.secondaryText }]} numberOfLines={1}>{track.artist}</Text>
+        <View style={styles.artistRow}>
+          {track.source === 'spotify' && (
+            <FontAwesome name="spotify" size={13} color="#1DB954" style={{ marginRight: 5 }} />
+          )}
+          <Text style={[styles.artist, { color: currentTheme.secondaryText, flexShrink: 1 }]} numberOfLines={1}>
+            {track.artist}
+          </Text>
+        </View>
       </View>
       {liked && <Ionicons name="heart" size={16} color={currentTheme.accent} style={{ marginRight: 6 }} />}
       {remote && (
@@ -91,9 +98,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  artistRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
   artist: {
     fontSize: 14,
-    marginTop: 2,
   },
   moreButton: {
     padding: 5,

@@ -46,7 +46,8 @@ export default function OnboardingScreen() {
     setStarting(true);
     await requestLocalMusic().catch(() => {});
     await completeOnboarding();
-    router.replace('/(tabs)');
+    // Offer sign up / log in / Spotify next — skippable with "Not now".
+    router.replace({ pathname: '/auth', params: { from: 'onboarding', mode: 'register' } });
   };
 
   return (

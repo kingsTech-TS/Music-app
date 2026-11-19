@@ -15,13 +15,15 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlayerStore } from '../store/usePlayerStore';
+import { useRouter } from 'expo-router';
 import { api } from '../lib/api';
 import { FadeIn } from './Motion';
 
 // Bottom sheet opened from a track's ⋮ button: like, add to playlist, remove from playlist.
 export default function TrackActionsSheet() {
   const insets = useSafeAreaInsets();
-  const { actionTrack: track, actionContext, closeTrackActions, theme, likedIds, toggleLike, addTrack } = usePlayerStore();
+  const { actionTrack: track, actionContext, closeTrackActions, theme, likedIds, toggleLike, addToQueue } = usePlayerStore();
+  const router = useRouter();
   const [view, setView] = useState('menu'); // 'menu' | 'playlists'
   const [playlists, setPlaylists] = useState(null);
   const [newName, setNewName] = useState('');
@@ -115,16 +117,37 @@ export default function TrackActionsSheet() {
               onPress={() => toggleLike(track).catch(fail)}
             />
             <Row icon="add-circle-outline" label="Add to playlist" onPress={openPlaylists} />
-            {!!track.url && (
-              <Row
-                icon="list-outline"
-                label="Add to queue"
-                onPress={() => {
-                  addTrack(track);
-                  closeTrackActions();
-                }}
-              />
+            {(!!track.url || track.source === 'spotify') && (
+              <>
+                <Row
+                  icon="play-forward-outline"
+                  label="Play next"
+                  onPress={() => {
+                    addToQueue(track, { next: true });
+                    closeTrackActions();
+                  }}
+                />
+                <Row
+                  icon="list-outline"
+                  label="Add to queue"
+                  onPress={() => {
+                    addToQueue(track);
+                    closeTrackActions();
+                  }}
+                />
+              </>
             )}
+            <Row
+              icon="document-text-outline"
+              label="Lyrics"
+              onPress={() => {
+                closeTrackActions();
+                router.push({
+                  pathname: '/lyrics',
+                  params: { title: track.title, artist: track.artist, album: track.album || '', duration: track.duration || '', id: track.id },
+                });
+              }}
+            />
             {actionContext?.playlistId && (
               <Row icon="remove-circle-outline" label="Remove from this playlist" onPress={removeFromPlaylist} />
             )}

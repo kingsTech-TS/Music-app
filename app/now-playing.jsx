@@ -7,19 +7,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { isRemoteTrack } from '../lib/api';
+import { usePlaybackPosition } from '../hooks/usePlaybackPosition';
 
 const { width: W, height: H } = Dimensions.get('window');
-
-// Safe lazy load for TrackPlayer hooks (Expo Go has no native module)
-const getTrackPlayerStuff = () => {
-  try {
-    const TP = require('react-native-track-player');
-    return { TrackPlayer: TP.default, useProgress: TP.useProgress, isNative: !!TP.default.setupPlayer };
-  } catch (e) {
-    return { TrackPlayer: null, useProgress: () => ({ position: 0, duration: 0 }), isNative: false };
-  }
-};
-const { TrackPlayer, useProgress, isNative } = getTrackPlayerStuff();
 
 // ---- Geometry for the curved control panel ----
 const PANEL_H = Math.min(400, H * 0.48); // height of the dome-shaped panel
@@ -105,9 +95,11 @@ export default function NowPlayingScreen() {
   const insets = useSafeAreaInsets();
   const {
     currentTrack, isPlaying, togglePlayback, skipToNext, skipToPrevious,
-    shuffle, toggleShuffle, repeatMode, setRepeatMode, theme, likedIds, toggleLike, openTrackActions,
+    shuffle, toggleShuffle, repeatMode, cycleRepeat, theme, likedIds, toggleLike, openTrackActions,
+    seekTo,
   } = usePlayerStore();
-  const { position, duration } = useProgress();
+  // Native player, Spotify (polled) or the saved resume point — whichever applies.
+  const { position, duration } = usePlaybackPosition(true);
   const [heartScale, popHeart] = usePop();
 
   if (!currentTrack) return null;
@@ -119,11 +111,8 @@ export default function NowPlayingScreen() {
   const progress = duration > 0 ? Math.min(1, position / duration) : 0;
 
   const handleSeek = async (p) => {
-    if (isNative && TrackPlayer && duration > 0) await TrackPlayer.seekTo(p * duration);
+    if (duration > 0) await seekTo(p * duration);
   };
-
-  const cycleRepeat = () =>
-    setRepeatMode(repeatMode === 'off' ? 'queue' : repeatMode === 'queue' ? 'track' : 'off');
 
   const artHeight = H - PANEL_H - insets.bottom + 90; // artwork tucks behind the curved panel
 
@@ -151,11 +140,34 @@ export default function NowPlayingScreen() {
         <TouchableOpacity style={styles.glassBtn} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={20} color="#fff" />
         </TouchableOpacity>
-        {canLike && (
-          <TouchableOpacity style={styles.glassBtn} onPress={() => openTrackActions(currentTrack)}>
-            <Ionicons name="ellipsis-horizontal" size={18} color="#fff" />
-          </TouchableOpacity>
-        )}
+        <View style={styles.topRight}>
+          <PressableScale
+            style={styles.glassBtn}
+            scaleTo={0.85}
+            onPress={() =>
+              router.push({
+                pathname: '/lyrics',
+                params: {
+                  title: currentTrack.title,
+                  artist: currentTrack.artist,
+                  album: currentTrack.album || '',
+                  duration: currentTrack.duration || '',
+                  id: currentTrack.id,
+                },
+              })
+            }
+          >
+            <Ionicons name="document-text-outline" size={18} color="#fff" />
+          </PressableScale>
+          <PressableScale style={styles.glassBtn} scaleTo={0.85} onPress={() => router.push('/queue')}>
+            <Ionicons name="list" size={19} color="#fff" />
+          </PressableScale>
+          {canLike && (
+            <PressableScale style={styles.glassBtn} scaleTo={0.85} onPress={() => openTrackActions(currentTrack)}>
+              <Ionicons name="ellipsis-horizontal" size={18} color="#fff" />
+            </PressableScale>
+          )}
+        </View>
       </View>
 
       {/* Track title over the artwork */}
@@ -253,6 +265,10 @@ const styles = StyleSheet.create({
     right: 20,
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  topRight: {
+    flexDirection: 'row',
+    gap: 10,
   },
   glassBtn: {
     width: 40,

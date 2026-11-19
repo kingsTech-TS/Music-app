@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, SafeAreaView, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Linking, ScrollView, Image, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { PressableScale } from '../../components/Motion';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
@@ -7,7 +8,22 @@ import { usePlayerStore } from '../../store/usePlayerStore';
 import TrackItem from '../../components/TrackItem';
 import { api } from '../../lib/api';
 
-const TABS = ['Songs', 'Liked', 'Artists', 'Folders'];
+const TABS = ['Songs', 'Liked', 'History', 'Artists', 'Folders'];
+
+const formatTime = (s) => {
+  const m = Math.floor((s || 0) / 60);
+  const sec = Math.floor((s || 0) % 60);
+  return `${m}:${sec < 10 ? '0' : ''}${sec}`;
+};
+
+const timeAgo = (iso) => {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+};
 
 export default function LibraryScreen() {
   const {
@@ -16,13 +32,16 @@ export default function LibraryScreen() {
   } = usePlayerStore();
   const [activeTab, setActiveTab] = useState('Songs');
   const [liked, setLiked] = useState([]);
+  const [history, setHistory] = useState([]);
   const [loadingRemote, setLoadingRemote] = useState(true);
   const [error, setError] = useState('');
 
   const loadRemote = useCallback(async () => {
     setError('');
     try {
-      setLiked((await api.library.likes()).items);
+      const [likes, hist] = await Promise.all([api.library.likes(), api.library.history()]);
+      setLiked(likes.items);
+      setHistory(hist);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -160,6 +179,70 @@ export default function LibraryScreen() {
       );
     }
 
+    if (activeTab === 'History') {
+      const tracks = history.map((h) => h.track);
+      const clear = () =>
+        Alert.alert('Clear history', 'Remove your listening history and saved positions?', [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Clear',
+            style: 'destructive',
+            onPress: () => api.library.clearHistory().then(loadRemote).catch((e) => Alert.alert('Could not clear', e.message)),
+          },
+        ]);
+      return (
+        <FlatList
+          data={history}
+          keyExtractor={(item) => item.track.id}
+          contentContainerStyle={{ paddingBottom: 100 }}
+          refreshing={false}
+          onRefresh={loadRemote}
+          ListHeaderComponent={
+            history.length > 0 && (
+              <PressableScale onPress={clear} style={styles.clearRow}>
+                <Text style={{ color: theme.secondaryText, fontWeight: '600' }}>Clear history</Text>
+              </PressableScale>
+            )
+          }
+          renderItem={({ item, index }) => {
+            const pct = item.duration ? Math.min(1, item.position / item.duration) : 0;
+            return (
+              // Tap → continue from where it stopped (then keep going through the history list).
+              <PressableScale
+                style={styles.historyItem}
+                scaleTo={0.97}
+                onPress={() => playList(tracks, index, { startAt: item.position })}
+              >
+                {item.track.artwork ? (
+                  <Image source={{ uri: item.track.artwork }} style={styles.historyArt} />
+                ) : (
+                  <View style={[styles.historyArt, { backgroundColor: theme.surface, alignItems: 'center', justifyContent: 'center' }]}>
+                    <Ionicons name="musical-note" size={20} color={theme.accent} />
+                  </View>
+                )}
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={[styles.historyTitle, { color: theme.text }]} numberOfLines={1}>{item.track.title}</Text>
+                  <Text style={{ color: theme.secondaryText, fontSize: 13 }} numberOfLines={1}>
+                    {item.track.artist} · {timeAgo(item.played_at)}
+                  </Text>
+                  {item.position > 0 && (
+                    <View style={styles.resumeRow}>
+                      <View style={[styles.progressTrack, { backgroundColor: theme.surface }]}>
+                        <View style={[styles.progressFill, { width: `${pct * 100}%`, backgroundColor: theme.accent }]} />
+                      </View>
+                      <Text style={[styles.resumeText, { color: theme.accent }]}>Resume at {formatTime(item.position)}</Text>
+                    </View>
+                  )}
+                </View>
+                <Ionicons name={item.position > 0 ? 'play-circle' : 'play-circle-outline'} size={30} color={theme.accent} />
+              </PressableScale>
+            );
+          }}
+          ListEmptyComponent={<Empty text="Songs you play will show up here, ready to continue where you stopped" />}
+        />
+      );
+    }
+
     // Liked songs (stored on the server)
     return (
       <FlatList
@@ -175,15 +258,20 @@ export default function LibraryScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.primary }]}>
+    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: theme.primary }]}>
       <View style={styles.header}>
         <Text style={[styles.title, { color: theme.text }]}>My Library</Text>
-        <PressableScale onPress={activeTab === 'Liked' ? loadRemote : scanLocalMusic}>
+        <PressableScale onPress={activeTab === 'Liked' || activeTab === 'History' ? loadRemote : scanLocalMusic}>
           <Ionicons name="refresh" size={24} color={theme.text} />
         </PressableScale>
       </View>
 
-      <View style={styles.tabContainer}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabScroll}
+        contentContainerStyle={styles.tabContainer}
+      >
         {TABS.map((tab) => (
           <PressableScale
             key={tab}
@@ -193,7 +281,7 @@ export default function LibraryScreen() {
             <Text style={[styles.tabText, { color: activeTab === tab ? theme.accent : theme.secondaryText }]}>{tab}</Text>
           </PressableScale>
         ))}
-      </View>
+      </ScrollView>
 
       {renderTab()}
     </SafeAreaView>
@@ -214,10 +302,52 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800',
   },
-  tabContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 10,
+  tabScroll: {
+    flexGrow: 0,
     marginBottom: 20,
+  },
+  tabContainer: {
+    paddingHorizontal: 10,
+  },
+  clearRow: {
+    alignItems: 'flex-end',
+    paddingHorizontal: 20,
+    paddingBottom: 6,
+  },
+  historyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  historyArt: {
+    width: 54,
+    height: 54,
+    borderRadius: 12,
+  },
+  historyTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  resumeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  progressTrack: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginRight: 8,
+  },
+  progressFill: {
+    height: 4,
+    borderRadius: 2,
+  },
+  resumeText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   tabItem: {
     paddingHorizontal: 15,

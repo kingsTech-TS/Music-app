@@ -13,9 +13,9 @@ const syncUserState = (user) => {
 };
 
 /**
- * No sign-up / login screens:
- *  - First launch creates an anonymous account (POST /auth/guest) behind the scenes.
- *  - The only "sign in" is connecting Spotify (signInWithSpotify).
+ * Accounts:
+ *  - First launch creates an anonymous account (POST /auth/guest) behind the scenes, so signing up is optional.
+ *  - register/login (email) and signInWithSpotify keep the guest's data (upgrade or merge on the server).
  *  - If the backend is unreachable the app still works with songs on the device.
  */
 export const useAuthStore = create((set, get) => ({
@@ -73,6 +73,33 @@ export const useAuthStore = create((set, get) => ({
     set({ onboarded: true });
     await storage.set(ONBOARDED_KEY, '1');
     if (get().user && !get().user.onboarded) api.users.markOnboarded().catch(() => {});
+  },
+
+  // Email sign-up: upgrades this device's guest account, keeping its likes/playlists.
+  register: async (name, email, password) => {
+    if (!get().user) await get().ensureSession();
+    const data = await api.auth.register(name.trim(), email.trim(), password);
+    await setTokens(data.access_token, data.refresh_token);
+    set({ user: data.user });
+    syncUserState(data.user);
+    return data.user;
+  },
+
+  // Email login: this device's guest data is merged into the account.
+  login: async (email, password) => {
+    if (!get().user) await get().ensureSession();
+    const data = await api.auth.login(email.trim(), password);
+    await setTokens(data.access_token, data.refresh_token);
+    set({ user: data.user });
+    syncUserState(data.user);
+    return data.user;
+  },
+
+  // Sign out of the account; the device continues with a fresh guest account.
+  logout: async () => {
+    const player = usePlayerStore.getState();
+    if (player.mode === 'spotify' && player.isPlaying) api.spotify.pause().catch(() => {});
+    return get().resetAccount();
   },
 
   // Called with the authorization code from Spotify's login page.

@@ -6,7 +6,8 @@ import { Animated, Easing, Pressable, View } from 'react-native';
  */
 
 // Springy "press in" feedback. Drop-in replacement for TouchableOpacity.
-export function PressableScale({ children, style, scaleTo = 0.94, onPress, onLongPress, disabled, hitSlop, ...rest }) {
+// `containerStyle` styles the outer touch area (e.g. flex: 1 inside a row); `style` styles the animated content.
+export function PressableScale({ children, style, containerStyle, scaleTo = 0.94, onPress, onLongPress, disabled, hitSlop, ...rest }) {
   const scale = useRef(new Animated.Value(1)).current;
   const animate = (to) =>
     Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 40, bounciness: to === 1 ? 10 : 0 }).start();
@@ -17,6 +18,7 @@ export function PressableScale({ children, style, scaleTo = 0.94, onPress, onLon
       onLongPress={onLongPress}
       disabled={disabled}
       hitSlop={hitSlop}
+      style={containerStyle}
       onPressIn={() => animate(scaleTo)}
       onPressOut={() => animate(1)}
       {...rest}

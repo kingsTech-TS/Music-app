@@ -20,6 +20,8 @@ import { usePlayerStore } from '../../store/usePlayerStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { api } from '../../lib/api';
 import { FadeIn, PressableScale } from '../../components/Motion';
+import { useSpotifyLogin } from '../../hooks/useSpotifyLogin';
+import { FontAwesome } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
 
@@ -58,6 +60,11 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
+  const spotifyConnected = !!user?.spotify?.connected;
+  const [spotifyFeed, setSpotifyFeed] = useState(null);
+  const [spotifyLoading, setSpotifyLoading] = useState(false);
+  const spotifyLogin = useSpotifyLogin();
+
   const load = useCallback(async (cat) => {
     try {
       setError('');
@@ -70,17 +77,38 @@ export default function HomeScreen() {
     }
   }, []);
 
+  const loadSpotify = useCallback(async () => {
+    setSpotifyLoading(true);
+    try {
+      setSpotifyFeed(await api.spotify.home());
+    } catch (e) {
+      setSpotifyFeed(null);
+    } finally {
+      setSpotifyLoading(false);
+    }
+  }, []);
+
   // Reload when the category changes or once the device's account is ready.
   useEffect(() => {
     load(category);
   }, [category, user?.id]);
 
+  // Spotify sections load once connected (and again after reconnecting).
+  useEffect(() => {
+    if (spotifyConnected) loadSpotify();
+    else setSpotifyFeed(null);
+  }, [spotifyConnected, user?.spotify?.connected_at]);
+
   const onRefresh = () => {
     setRefreshing(true);
     if (!user) ensureSession();
     if (localPermission === 'granted') scanLocalMusic();
+    if (spotifyConnected) loadSpotify();
     load(category);
   };
+
+  const sp = spotifyFeed || {};
+  const spotifyNeedsReconnect = Object.values(sp.unavailable || {}).includes('MISSING_SCOPE');
 
   const categories = feed?.categories?.length ? ['All', ...feed.categories] : [];
   const popular = feed?.popular || [];
@@ -93,8 +121,11 @@ export default function HomeScreen() {
     router.push('/now-playing');
   };
 
+  const spotifyCount =
+    (sp.recently_played?.length || 0) + (sp.top_tracks?.length || 0) + (sp.liked?.length || 0) + (sp.playlists?.length || 0);
   const nothingYet =
-    !loading && !popular.length && !recent.length && !collections.length && !localTracks.length;
+    !loading && !spotifyLoading && !popular.length && !recent.length && !collections.length &&
+    !localTracks.length && !spotifyCount;
 
   const SectionHeader = ({ title, onSeeAll }) => (
     <View style={styles.sectionHeader}>
@@ -228,6 +259,90 @@ export default function HomeScreen() {
           </FadeIn>
         ) : null}
 
+        {/* ---------- Spotify ---------- */}
+        {spotifyConnected && spotifyLoading && !spotifyFeed && (
+          <ActivityIndicator color={theme.accent} style={{ marginTop: 30 }} />
+        )}
+
+        {(spotifyNeedsReconnect || (user && !spotifyConnected && spotifyLogin.enabled)) && (
+          <FadeIn delay={120}>
+            <PressableScale
+              style={[styles.promptCard, { backgroundColor: theme.surface }]}
+              scaleTo={0.97}
+              onPress={spotifyLogin.connect}
+              disabled={spotifyLogin.connecting}
+            >
+              <FontAwesome name="spotify" size={26} color="#1DB954" />
+              <View style={{ flex: 1, marginLeft: 14 }}>
+                <Text style={[styles.promptTitle, { color: theme.text }]}>
+                  {spotifyConnected ? 'Reconnect Spotify' : 'Connect Spotify'}
+                </Text>
+                <Text style={{ color: theme.secondaryText, fontSize: 12, marginTop: 2 }}>
+                  {spotifyConnected
+                    ? 'Allow access to your recently played and top tracks'
+                    : 'Search and play millions of songs from your Spotify'}
+                </Text>
+              </View>
+              {spotifyLogin.connecting ? (
+                <ActivityIndicator color={theme.accent} />
+              ) : (
+                <Ionicons name="refresh" size={18} color={theme.secondaryText} />
+              )}
+            </PressableScale>
+          </FadeIn>
+        )}
+
+        {sp.recently_played?.length > 0 && (
+          <FadeIn delay={120}>
+            <SectionHeader title="Jump Back In" />
+            <SongRow data={sp.recently_played} />
+          </FadeIn>
+        )}
+
+        {sp.top_tracks?.length > 0 && (
+          <FadeIn delay={180}>
+            <SectionHeader title="Your Top Tracks" />
+            <SongRow data={sp.top_tracks} />
+          </FadeIn>
+        )}
+
+        {sp.liked?.length > 0 && (
+          <FadeIn delay={240}>
+            <SectionHeader title="Liked on Spotify" />
+            <SongRow data={sp.liked} />
+          </FadeIn>
+        )}
+
+        {sp.playlists?.length > 0 && (
+          <FadeIn delay={300}>
+            <SectionHeader title="Your Spotify Playlists" />
+            <FlatList
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              data={sp.playlists}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.hList}
+              renderItem={({ item }) => (
+                <PressableScale
+                  style={styles.playlistCard}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/detail',
+                      params: { type: 'spotify_playlist', id: item.id, title: item.name, artwork: item.artwork || '' },
+                    })
+                  }
+                >
+                  <Artwork uri={item.artwork} style={styles.playlistImage} theme={theme} icon="list" />
+                  <Text style={[styles.songTitle, { color: theme.text, marginTop: 8 }]} numberOfLines={1}>{item.name}</Text>
+                  {!!item.owner && (
+                    <Text style={[styles.songArtist, { color: theme.secondaryText }]} numberOfLines={1}>By {item.owner}</Text>
+                  )}
+                </PressableScale>
+              )}
+            />
+          </FadeIn>
+        )}
+
         {/* Recently played */}
         {recent.length > 0 && (
           <>
@@ -294,7 +409,7 @@ export default function HomeScreen() {
           </FadeIn>
         )}
 
-        {nothingYet && localPermission === 'granted' && !localScanning && (
+        {nothingYet && !localScanning && (
           <View style={styles.empty}>
             <Ionicons name="musical-notes-outline" size={48} color={theme.secondaryText} />
             <Text style={{ color: theme.secondaryText, marginTop: 10, textAlign: 'center' }}>
@@ -422,6 +537,15 @@ const styles = StyleSheet.create({
   songImage: {
     width: CARD_W,
     height: CARD_W * 1.2,
+    borderRadius: 18,
+  },
+  playlistCard: {
+    width: CARD_W,
+    marginRight: 14,
+  },
+  playlistImage: {
+    width: CARD_W,
+    height: CARD_W,
     borderRadius: 18,
   },
   songMeta: {

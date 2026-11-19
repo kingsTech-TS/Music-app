@@ -6,16 +6,16 @@ import {
   TextInput,
   FlatList,
   ActivityIndicator,
-  SafeAreaView,
   TouchableOpacity,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { usePlayerStore } from '../../store/usePlayerStore';
 import TrackItem from '../../components/TrackItem';
 import { useAuthStore } from '../../store/useAuthStore';
 import { api } from '../../lib/api';
 
-const MIN_CHARS = 3;
+const MIN_CHARS = 2;
 const DEBOUNCE_MS = 350;
 
 export default function SearchScreen() {
@@ -24,6 +24,7 @@ export default function SearchScreen() {
   const [error, setError] = useState('');
   const { searchResults, setSearchResults, playList, theme, localTracks } = usePlayerStore();
   const userId = useAuthStore((s) => s.user?.id);
+  const spotifyConnected = useAuthStore((s) => !!s.user?.spotify?.connected);
   const [recentSearches, setRecentSearches] = useState([]);
   const debounce = useRef(null);
   const latest = useRef(''); // ignore responses for stale queries
@@ -49,19 +50,33 @@ export default function SearchScreen() {
   );
   const results = [...localMatches, ...searchResults];
 
+  // Searches Rave (uploads + saved songs) and, when connected, the whole Spotify catalog — in parallel.
   const runSearch = async (text, save = false) => {
     latest.current = text;
     setLoading(true);
     setError('');
-    try {
-      const res = await api.search.query(text, save);
-      if (latest.current === text) setSearchResults(res.tracks);
-      if (save) loadRecent();
-    } catch (e) {
-      if (latest.current === text) setError(e.message);
-    } finally {
-      if (latest.current === text) setLoading(false);
+    const [library, spotify] = await Promise.allSettled([
+      api.search.query(text, save),
+      spotifyConnected ? api.spotify.search(text) : Promise.resolve([]),
+    ]);
+    if (latest.current !== text) return;
+
+    const seen = new Set();
+    const merged = [];
+    for (const t of [
+      ...(spotify.status === 'fulfilled' ? spotify.value : []),
+      ...(library.status === 'fulfilled' ? library.value.tracks : []),
+    ]) {
+      if (!seen.has(t.id)) {
+        seen.add(t.id);
+        merged.push(t);
+      }
     }
+    setSearchResults(merged);
+    const failure = [spotify, library].find((r) => r.status === 'rejected');
+    if (failure && !merged.length) setError(failure.reason?.message || 'Search failed');
+    if (save) loadRecent();
+    setLoading(false);
   };
 
   const handleSearch = (text) => {
@@ -99,7 +114,7 @@ export default function SearchScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.primary }]}>
+    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: theme.primary }]}>
       <View style={[styles.searchBarContainer, { backgroundColor: theme.surface }]}>
         <Ionicons name="search" size={20} color={theme.secondaryText} style={styles.searchIcon} />
         <TextInput
